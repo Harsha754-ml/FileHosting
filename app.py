@@ -10,10 +10,18 @@ os.makedirs(FILES, exist_ok=True)
 
 def load():
     if not os.path.exists(DB): return {}
-    return json.load(open(DB))
+    with open(DB) as f:
+        return json.load(f)
 
 def save(db):
-    json.dump(db, open(DB, "w"))
+    with open(DB, "w") as f:
+        json.dump(db, f)
+
+def is_valid_key(key):
+    """Validate key: alphanumeric and underscores only, 1-50 chars"""
+    if not key or len(key) > 50:
+        return False
+    return all(c.isalnum() or c == '_' for c in key)
 
 @app.route("/")
 def home():
@@ -21,24 +29,42 @@ def home():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    key = request.form["key"].strip()
-    file = request.files["file"]
+    try:
+        key = request.form.get("key", "").strip()
+        file = request.files.get("file")
+        
+        if not key:
+            return "Error: Key is required", 400
+        if not is_valid_key(key):
+            return "Error: Key must be 1-50 alphanumeric/underscore chars", 400
+        if not file or file.filename == "":
+            return "Error: File is required", 400
 
-    db = load()
+        db = load()
+        
+        if key in db:
+            return f"Error: Key '{key}' already exists", 409
 
-    filename = key + "_" + file.filename
-    path = os.path.join(FILES, filename)
-    file.save(path)
+        filename = key + "_" + file.filename
+        path = os.path.join(FILES, filename)
+        file.save(path)
 
-    db[key] = filename
-    save(db)
+        db[key] = filename
+        save(db)
 
-    return f"Uploaded. Use /{key}"
+        return f"Uploaded. Use /{key}", 200
+    except Exception as e:
+        return f"Error: {str(e)}", 500
 
 @app.route("/<key>")
 def get(key):
-    db = load()
-    if key not in db:
-        return "Not found"
-    path = os.path.join(FILES, db[key])
-    return send_file(path, as_attachment=True)
+    try:
+        db = load()
+        if key not in db:
+            return "File not found", 404
+        path = os.path.join(FILES, db[key])
+        if not os.path.exists(path):
+            return "File not found on disk", 404
+        return send_file(path, as_attachment=True)
+    except Exception as e:
+        return f"Error: {str(e)}", 500
